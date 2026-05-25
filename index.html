@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NoRedirect — Bug Bounty Tool</title>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #080b0f;
+      --bg2:      #0d1117;
+      --bg3:      #111820;
+      --panel:    #0f1923;
+      --border:   #1e3040;
+      --green:    #00ff88;
+      --cyan:     #00d4ff;
+      --red:      #ff3c5a;
+      --yellow:   #f0c040;
+      --muted:    #4a6070;
+      --text:     #c8d8e0;
+      --mono:     'Share Tech Mono', monospace;
+      --sans:     'Rajdhani', sans-serif;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      overflow-x: hidden;
+    }
+
+    /* ── Scanline overlay ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 9999;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,.06) 2px,
+        rgba(0,0,0,.06) 4px
+      );
+      pointer-events: none;
+    }
+
+    /* ── Noise texture ── */
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 9998;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.04'/%3E%3C/svg%3E");
+      pointer-events: none; opacity: .4;
+    }
+
+    /* ── Grid bg ── */
+    .grid-bg {
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(0,212,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,212,255,.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    /* ── Layout ── */
+    .app {
+      position: relative; z-index: 1;
+      min-height: 100vh;
+      display: flex; flex-direction: column;
+      padding: 0 16px;
+    }
+
+    /* ── Header ── */
+    header {
+      padding: 28px 0 20px;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      animation: fadeDown .6s ease both;
+    }
+
+    .logo-line {
+      display: flex; align-items: center; gap: 14px;
+    }
+
+    .logo-icon {
+      width: 42px; height: 42px;
+      border: 2px solid var(--cyan);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+      box-shadow: 0 0 16px rgba(0,212,255,.3);
+    }
+    .logo-icon::after {
+      content: '';
+      position: absolute; inset: 3px;
+      border: 1px solid rgba(0,212,255,.4);
+      border-radius: 3px;
+    }
+    .logo-icon svg { width: 22px; height: 22px; fill: var(--cyan); }
+
+    h1 {
+      font-family: var(--mono);
+      font-size: clamp(1.4rem, 4vw, 2rem);
+      color: var(--cyan);
+      letter-spacing: 2px;
+      text-shadow: 0 0 18px rgba(0,212,255,.5);
+    }
+
+    .tagline {
+      font-family: var(--mono);
+      font-size: .75rem;
+      color: var(--muted);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    /* ── Input card ── */
+    .input-card {
+      width: 100%; max-width: 760px; margin: 0 auto 20px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 24px;
+      box-shadow: 0 0 30px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.04);
+      animation: fadeUp .6s .1s ease both;
+    }
+
+    .input-row {
+      display: flex; gap: 10px; align-items: stretch;
+    }
+
+    .url-wrap {
+      flex: 1; position: relative;
+    }
+
+    .url-prefix {
+      position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+      font-family: var(--mono); font-size: .8rem; color: var(--muted);
+      pointer-events: none; user-select: none;
+    }
+
+    input[type="text"] {
+      width: 100%; height: 48px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--green);
+      font-family: var(--mono);
+      font-size: .9rem;
+      padding: 0 14px 0 58px;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    input[type="text"]::placeholder { color: var(--muted); }
+    input[type="text"]:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 3px rgba(0,212,255,.1);
+    }
+
+    .btn {
+      height: 48px; padding: 0 22px;
+      background: linear-gradient(135deg, #007acc, #00b894);
+      border: none; border-radius: 7px;
+      color: #fff; font-family: var(--sans); font-weight: 700;
+      font-size: 1rem; letter-spacing: 1px;
+      cursor: pointer; white-space: nowrap;
+      position: relative; overflow: hidden;
+      transition: transform .15s, box-shadow .2s;
+      box-shadow: 0 4px 14px rgba(0,180,148,.3);
+    }
+    .btn::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,.12), transparent);
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,180,148,.45); }
+    .btn:active { transform: translateY(1px); }
+    .btn.loading { opacity: .7; pointer-events: none; }
+
+    .btn-spinner {
+      display: none; width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      margin-right: 6px; vertical-align: middle;
+    }
+    .btn.loading .btn-spinner { display: inline-block; }
+    .btn.loading .btn-label::before { content: 'Fetching...'; }
+    .btn:not(.loading) .btn-label::before { content: 'PROBE'; }
+
+    /* ── Status bar ── */
+    .status-bar {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 14px; padding: 10px 14px;
+      background: var(--bg2); border-radius: 6px;
+      border: 1px solid var(--border);
+      font-family: var(--mono); font-size: .8rem;
+      min-height: 42px;
+    }
+
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0;
+      transition: background .3s, box-shadow .3s;
+    }
+    .status-dot.ok  { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .status-dot.err { background: var(--red);   box-shadow: 0 0 8px var(--red); }
+    .status-dot.rdr { background: var(--yellow);box-shadow: 0 0 8px var(--yellow); }
+
+    .status-code { font-weight: bold; }
+    .status-code.ok  { color: var(--green); }
+    .status-code.err { color: var(--red); }
+    .status-code.rdr { color: var(--yellow); }
+
+    .status-url { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+
+    /* ── History pills ── */
+    .history-row {
+      display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;
+    }
+    .history-pill {
+      font-family: var(--mono); font-size: .72rem;
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 3px 10px;
+      color: var(--muted); cursor: pointer;
+      transition: border-color .2s, color .2s;
+      max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .history-pill:hover { border-color: var(--cyan); color: var(--cyan); }
+
+    /* ── Main panel ── */
+    .main-panel {
+      width: 100%; max-width: 1200px; margin: 0 auto;
+      flex: 1; display: flex; flex-direction: column; gap: 14px;
+      animation: fadeUp .6s .2s ease both;
+    }
+
+    /* ── Tabs ── */
+    .tab-bar {
+      display: flex; gap: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab {
+      padding: 9px 20px;
+      font-family: var(--mono); font-size: .82rem;
+      color: var(--muted); cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color .2s, border-color .2s;
+      user-select: none;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ── Headers panel ── */
+    pre#headers-output {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 16px;
+      font-family: var(--mono); font-size: .8rem; color: var(--text);
+      overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+      min-height: 80px; max-height: 320px; overflow-y: auto;
+      line-height: 1.6;
+    }
+    pre#headers-output .hkey  { color: var(--cyan); }
+    pre#headers-output .hval  { color: var(--text); }
+    pre#headers-output .hcode { color: var(--green); font-size: 1rem; font-weight: bold; }
+    pre#headers-output .herr  { color: var(--red); }
+
+    /* ── Browser chrome ── */
+    .browser-chrome {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      flex: 1; display: flex; flex-direction: column;
+      min-height: 480px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    }
+
+    .browser-topbar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .browser-dots { display: flex; gap: 6px; }
+    .browser-dots span {
+      width: 10px; height: 10px; border-radius: 50%;
+    }
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #ffbd2e; }
+    .dot-g { background: #28c840; }
+
+    .browser-url-bar {
+      flex: 1;
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 5px; padding: 5px 12px;
+      font-family: var(--mono); font-size: .78rem; color: var(--muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    .browser-nav-btn {
+      background: none; border: 1px solid var(--border);
+      border-radius: 5px; padding: 4px 10px;
+      color: var(--muted); font-family: var(--mono); font-size: .78rem;
+      cursor: pointer; transition: color .2s, border-color .2s;
+    }
+    .browser-nav-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+
+    .iframe-wrap {
+      flex: 1; position: relative;
+    }
+
+    iframe#liveView {
+      width: 100%; height: 100%;
+      border: none;
+      background: #fff;
+      min-height: 420px;
+    }
+
+    .iframe-overlay {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg2); z-index: 2;
+      flex-direction: column; gap: 12px;
+    }
+    .iframe-overlay.hidden { display: none; }
+
+    .idle-icon {
+      width: 60px; height: 60px;
+      border: 2px solid var(--border); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .idle-icon svg { width: 28px; height: 28px; stroke: var(--muted); fill: none; stroke-width: 1.5; }
+    .idle-text { font-family: var(--mono); font-size: .82rem; color: var(--muted); }
+
+    /* ── Loading bar ── */
+    .load-bar {
+      height: 2px; background: var(--border); position: relative; overflow: hidden;
+    }
+    .load-bar-inner {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--cyan), var(--green));
+      transition: width .3s;
+      box-shadow: 0 0 8px var(--cyan);
+    }
+    .load-bar-inner.indeterminate {
+      width: 40% !important;
+      animation: loadSlide 1s linear infinite;
+    }
+
+    /* ── Redirect chain ── */
+    .redirect-chain {
+      display: none; align-items: center; flex-wrap: wrap; gap: 4px;
+      padding: 10px 14px;
+      background: rgba(240,192,64,.07);
+      border: 1px solid rgba(240,192,64,.2);
+      border-radius: 7px;
+      font-family: var(--mono); font-size: .78rem;
+    }
+    .redirect-chain.visible { display: flex; }
+    .rchain-item { color: var(--yellow); }
+    .rchain-arrow { color: var(--muted); }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 28px; padding: 18px 0 22px;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .footer-link {
+      text-decoration: none;
+      display: inline-flex; align-items: center; gap: 8px;
+      position: relative;
+    }
+
+    .footer-text {
+      font-family: var(--mono);
+      font-size: .82rem;
+      background: linear-gradient(90deg, #00ff88, #00d4ff, #a855f7, #ff3c5a, #f0c040, #00ff88);
+      background-size: 300% 100%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: shimmer 4s linear infinite;
+      letter-spacing: 1px;
+    }
+
+    .footer-pulse {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 1.5s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+
+    /* ── Keyframes ── */
+    @keyframes fadeDown  { from { opacity:0; transform: translateY(-16px); } to { opacity:1; transform: none; } }
+    @keyframes fadeUp    { from { opacity:0; transform: translateY(16px);  } to { opacity:1; transform: none; } }
+    @keyframes spin      { to { transform: rotate(360deg); } }
+    @keyframes pulse     { 0%,100% { transform: scale(1); opacity:1; } 50% { transform: scale(1.4); opacity:.6; } }
+    @keyframes shimmer   { to { background-position: -300% 0; } }
+    @keyframes loadSlide { from { transform: translateX(-200%); } to { transform: translateX(350%); } }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .input-row { flex-direction: column; }
+      .btn { width: 100%; justify-content: center; }
+      header { padding: 18px 0 14px; }
+      .tab { padding: 8px 12px; font-size: .76rem; }
+      .browser-topbar { flex-wrap: wrap; gap: 8px; }
+      .browser-url-bar { min-width: 0; font-size: .72rem; }
+      iframe#liveView { min-height: 320px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<div class="app">
+
+  <!-- Header -->
+  <header>
+    <div class="logo-line">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-1 14l-3-3 1.41-1.41L11 12.17l4.59-4.58L17 9l-6 6z"/>
+        </svg>
+      </div>
+      <h1>NO<span style="color:var(--green)">REDIRECT</span></h1>
+    </div>
+    <div class="tagline">// Bug Bounty Reconnaissance Tool</div>
+  </header>
+
+  <!-- Input Card -->
+  <div class="input-card" style="width:100%;max-width:760px;margin:0 auto 20px;">
+    <div class="input-row">
+      <div class="url-wrap">
+        <span class="url-prefix">TARGET ▸</span>
+        <input type="text" id="urlInput" placeholder="https://example.com/path" autocomplete="off" spellcheck="false" />
+      </div>
+      <button class="btn" id="probeBtn" onclick="probe()">
+        <span class="btn-spinner"></span>
+        <span class="btn-label"></span>
+      </button>
+    </div>
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <span class="status-code" id="statusCode">--</span>
+      <span class="status-url" id="statusUrl">Waiting for target...</span>
+    </div>
+    <div class="history-row" id="historyRow"></div>
+  </div>
+
+  <!-- Main Panel -->
+  <div class="main-panel">
+
+    <!-- Redirect chain -->
+    <div class="redirect-chain" id="redirectChain"></div>
+
+    <!-- Load bar -->
+    <div class="load-bar"><div class="load-bar-inner" id="loadBar"></div></div>
+
+    <!-- Tabs -->
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchTab('browser', this)">⬛ Live Preview</div>
+      <div class="tab" onclick="switchTab('headers', this)">📋 Headers</div>
+    </div>
+
+    <!-- Browser view -->
+    <div class="tab-content active" id="tab-browser">
+      <div class="browser-chrome">
+        <div class="browser-topbar">
+          <div class="browser-dots">
+            <span class="dot-r"></span>
+            <span class="dot-y"></span>
+            <span class="dot-g"></span>
+          </div>
+          <div class="browser-url-bar" id="browserUrlBar">about:blank</div>
+          <button class="browser-nav-btn" onclick="reloadCurrent()">↺ Reload</button>
+        </div>
+        <div class="iframe-wrap">
+          <div class="iframe-overlay" id="iframeOverlay">
+            <div class="idle-icon">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/></svg>
+            </div>
+            <div class="idle-text">// Enter a URL and press PROBE</div>
+          </div>
+          <iframe id="liveView" title="NoRedirect Preview" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+        </div>
+      </div>
+    </div>
+
+    <!-- Headers view -->
+    <div class="tab-content" id="tab-headers">
+      <pre id="headers-output">// No data yet — run a probe first</pre>
+    </div>
+
+  </div><!-- /.main-panel -->
+
+  <!-- Footer -->
+  <footer>
+    <a class="footer-link" href="https://tausifzaman.online" target="_blank" rel="noopener">
+      <span class="footer-pulse"></span>
+      <span class="footer-text">Made By Tausif Zaman</span>
+      <span class="footer-pulse"></span>
+    </a>
+  </footer>
+
+</div><!-- /.app -->
+
+<script>
+  /* ─────────────────────────────────────────
+     State
+  ───────────────────────────────────────── */
+  let currentUrl = '';
+  let history    = [];
+
+  /* ─────────────────────────────────────────
+     Helpers
+  ───────────────────────────────────────── */
+  function setLoading(on) {
+    const btn  = document.getElementById('probeBtn');
+    const bar  = document.getElementById('loadBar');
+    btn.classList.toggle('loading', on);
+    if (on) {
+      bar.classList.add('indeterminate');
+    } else {
+      bar.classList.remove('indeterminate');
+      bar.style.width = '100%';
+      setTimeout(() => { bar.style.width = '0%'; }, 400);
+    }
+  }
+
+  function setStatus(code, url, type) {
+    const dot  = document.getElementById('statusDot');
+    const sc   = document.getElementById('statusCode');
+    const su   = document.getElementById('statusUrl');
+    dot.className  = 'status-dot ' + type;
+    sc.className   = 'status-code ' + type;
+    sc.textContent = code;
+    su.textContent = url;
+  }
+
+  function getStatusType(code) {
+    if (!code || code === 0)          return 'err';
+    if (code >= 300 && code < 400)    return 'rdr';
+    if (code >= 200 && code < 300)    return 'ok';
+    return 'err';
+  }
+
+  function addHistory(url) {
+    if (!url || history.includes(url)) return;
+    history.unshift(url);
+    if (history.length > 6) history.pop();
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const row = document.getElementById('historyRow');
+    row.innerHTML = '';
+    history.forEach(u => {
+      const pill = document.createElement('div');
+      pill.className = 'history-pill';
+      pill.title = u;
+      pill.textContent = u.replace(/^https?:\/\//, '');
+      pill.onclick = () => { document.getElementById('urlInput').value = u; probe(); };
+      row.appendChild(pill);
+    });
+  }
+
+  function switchTab(name, el) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('tab-' + name).classList.add('active');
+  }
+
+  function renderHeaders(rawHeaders, statusCode) {
+    const pre = document.getElementById('headers-output');
+    const lines = rawHeaders.split('\n').map(l => l.trim()).filter(Boolean);
+    let html = `<span class="hcode">HTTP Status: ${statusCode}</span>\n\n`;
+    lines.forEach(line => {
+      if (line.startsWith('HTTP/')) {
+        html += `<span class="hcode">${escHtml(line)}</span>\n`;
+      } else {
+        const idx = line.indexOf(':');
+        if (idx > 0) {
+          const k = line.slice(0, idx);
+          const v = line.slice(idx + 1).trim();
+          html += `<span class="hkey">${escHtml(k)}</span>: <span class="hval">${escHtml(v)}</span>\n`;
+        } else {
+          html += escHtml(line) + '\n';
+        }
+      }
+    });
+    pre.innerHTML = html;
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;');
+  }
+
+  function reloadCurrent() {
+    if (currentUrl) {
+      document.getElementById('urlInput').value = currentUrl;
+      probe();
+    }
+  }
+
+  /* ─────────────────────────────────────────
+     Intercept clicks inside the iframe
+     so every link goes through the proxy
+  ───────────────────────────────────────── */
+  function hookIframe(iframe) {
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow.document;
+      if (!doc) return;
+
+      // Intercept <a> clicks
+      doc.addEventListener('click', function(e) {
+        const a = e.target.closest('a[href]');
+        if (!a) return;
+        const href = a.getAttribute('href');
+        if (!href || href.startsWith('#') || href.startsWith('javascript')) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Resolve relative URLs against base tag already injected by PHP
+        let resolved;
+        try {
+          resolved = new URL(href, doc.querySelector('base')?.href || currentUrl).href;
+        } catch {
+          resolved = href;
+        }
+        document.getElementById('urlInput').value = resolved;
+        probe();
+      }, true);
+
+      // Intercept <form> submissions
+      doc.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const form   = e.target;
+        const action = form.action || currentUrl;
+        let resolved;
+        try { resolved = new URL(action, currentUrl).href; } catch { resolved = action; }
+        document.getElementById('urlInput').value = resolved;
+        probe();
+      }, true);
+
+    } catch(err) {
+      // cross-origin restriction — nothing we can do; base tag still handles relative links
+    }
+  }
+
+  /* ─────────────────────────────────────────
+     Core probe function
+  ───────────────────────────────────────── */
+  function probe() {
+    const raw = document.getElementById('urlInput').value.trim();
+    if (!raw) return;
+
+    // Auto-prefix scheme if missing
+    const url = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
+    document.getElementById('urlInput').value = url;
+
+    setLoading(true);
+    document.getElementById('iframeOverlay').classList.add('hidden');
+    document.getElementById('redirectChain').classList.remove('visible');
+    document.getElementById('browserUrlBar').textContent = url;
+
+    fetch('no_redirect.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ url })
+    })
+    .then(r => r.json())
+    .then(data => {
+      setLoading(false);
+
+      if (data.error) {
+        setStatus('ERR', data.error, 'err');
+        document.getElementById('headers-output').textContent = '// Error: ' + data.error;
+        document.getElementById('liveView').srcdoc = `<body style="background:#0d1117;color:#ff3c5a;font-family:monospace;padding:30px">Error: ${data.error}</body>`;
+        return;
+      }
+
+      const type = getStatusType(data.status_code);
+      setStatus(data.status_code, data.url, type);
+      currentUrl = data.url;
+      addHistory(url);
+      document.getElementById('browserUrlBar').textContent = data.url;
+
+      // Show redirect chain for 3xx
+      if (type === 'rdr') {
+        const chain = document.getElementById('redirectChain');
+        const loc   = (data.headers.match(/[Ll]ocation:\s*(.+)/)||[])[1]?.trim() || '?';
+        chain.innerHTML = `<span class="rchain-item">${escHtml(url)}</span><span class="rchain-arrow"> ⟶ </span><span class="rchain-item" style="color:var(--yellow)">${escHtml(loc)}</span>`;
+        chain.classList.add('visible');
+      }
+
+      // Headers
+      renderHeaders(data.headers, data.status_code);
+
+      // Live preview — write srcdoc then hook
+      const iframe = document.getElementById('liveView');
+      iframe.srcdoc = data.content;
+      iframe.onload = () => hookIframe(iframe);
+    })
+    .catch(err => {
+      setLoading(false);
+      setStatus('ERR', String(err), 'err');
+      document.getElementById('headers-output').textContent = '// Fetch error: ' + err;
+    });
+  }
+
+  /* ─────────────────────────────────────────
+     Enter key support
+  ───────────────────────────────────────── */
+  document.getElementById('urlInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') probe();
+  });
+</script>
+</body>
+</html>
+
